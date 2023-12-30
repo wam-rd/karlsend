@@ -217,6 +217,9 @@ var MainnetParams = Params{
 		// Team DNS seed
 		"mainnet-dnsseed-1.karlsencoin.com",
 		"mainnet-dnsseed-2.karlsencoin.com",
+		"mainnet-dnsseed-3.karlsencoin.com",
+		"mainnet-dnsseed-4.karlsencoin.com",
+		"mainnet-dnsseed-5.karlsencoin.com",
 	},
 
 	// DAG parameters
@@ -284,7 +287,7 @@ var TestnetParams = Params{
 	RPCPort:     "42210",
 	DefaultPort: "42211",
 	DNSSeeds: []string{
-		"testnet-1.karlsencoin.com",
+		"testnet-1-dnsseed.karlsencoin.com",
 	},
 
 	// DAG parameters
