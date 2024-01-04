@@ -6,6 +6,7 @@ import (
 
 	//"crypto/sha3"
 	"encoding/binary"
+	"fmt"
 	"sync"
 )
 
@@ -74,7 +75,8 @@ func newItemState(ctx *fishhashContext, index int64) *itemState {
 	state.mix = *state.cache[index%state.numCacheItems]
 	state.mix[0] ^= byte(state.seed)
 
-	hash := sha3.New512()
+	//hash := sha3.New512()
+	hash := sha3.NewLegacyKeccak512()
 	hash.Write(state.mix[:])
 	copy(state.mix[:], hash.Sum(nil))
 
@@ -90,7 +92,8 @@ func (state *itemState) update(round uint32) {
 }
 
 func (state *itemState) final() hash512 {
-	hash := sha3.New512()
+	//hash := sha3.New512()
+	hash := sha3.NewLegacyKeccak512()
 	hash.Write(state.mix[:])
 	copy(state.mix[:], hash.Sum(nil))
 	return state.mix
@@ -209,7 +212,8 @@ func fishhashKernel(ctx *fishhashContext, seed hash512) hash256 {
 func hash(output, header []byte, ctx *fishhashContext) {
 	seed := hash512{}
 
-	hasher := sha3.New512()
+	//hasher := sha3.New512()
+	hasher := sha3.NewLegacyKeccak512()
 	hasher.Write(header)
 	copy(seed[:], hasher.Sum(nil))
 
@@ -225,9 +229,16 @@ func hash(output, header []byte, ctx *fishhashContext) {
 }
 
 func bitwiseXOR(x, y hash512) hash512 {
-	var result hash512
+	/*var result hash512
 	for i := 0; i < len(result); i++ {
 		result[i] = x[i] ^ y[i]
+	}
+	return result*/
+	var result hash512
+	for i := 0; i < 8; i++ {
+		//binary.BigEndian.PutUint64(result[4*i:], binary.BigEndian.Uint64(x[4*i:])^binary.BigEndian.Uint64(y[4*i:]))
+		//binary.LittleEndian.PutUint64(result[4*i:], binary.LittleEndian.Uint64(x[4*i:])^binary.LittleEndian.Uint64(y[4*i:]))
+		binary.LittleEndian.PutUint64(result[8*i:], binary.LittleEndian.Uint64(x[8*i:])^binary.LittleEndian.Uint64(y[8*i:]))
 	}
 	return result
 }
@@ -236,31 +247,69 @@ func buildLightCache(cache []*hash512, numItems int, seed hash256) {
 
 	println("GENERATING LIGHT CACHE ===============================================\n")
 	item := hash512{}
-	hash := sha3.New512()
+	//hash := sha3.New512()
+	hash := sha3.NewLegacyKeccak512()
 	hash.Write(seed[:])
 	copy(item[:], hash.Sum(nil))
+	//cache[0] = &item
 	cache[0] = &item
+
+	fmt.Printf("buildLightCache seed : %x\n", seed) //ok
+	fmt.Printf("buildLightCache item : %x\n", item) //ok
+	fmt.Printf("buildLightCache cache[0] : %x\n", cache[0])
+	fmt.Printf("buildLightCache *cache[0] : %x\n", *cache[0])
 
 	for i := 1; i < numItems; i++ {
 		hash.Reset()
-		hash.Write(item[:])
-		copy(item[:], hash.Sum(nil))
-		cache[i] = &item
+		//hash.Write(item[:])
+		//copy(item[:], hash.Sum(nil))
+		//*cache[i] = item
+		hash.Write(cache[i-1][:])
+		newitem := hash512{}
+		copy(newitem[:], hash.Sum(nil))
+		cache[i] = &newitem
+		//copy(cache[i][:], hash.Sum(nil))
 	}
+	fmt.Printf("buildLightCache cache[0] : %x\n", *cache[0])
+	fmt.Printf("buildLightCache cache[42] : %x\n", *cache[42])
+	fmt.Printf("buildLightCache cache[100] : %x\n", *cache[100])
 
 	for q := 0; q < lightCacheRounds; q++ {
 		for i := 0; i < numItems; i++ {
 			indexLimit := uint32(numItems)
-			t := uint32(cache[i][0])
+			//t := uint32(cache[i][0])
+			//t := binary.BigEndian.Uint32(cache[i][0:])
+			t := binary.LittleEndian.Uint32(cache[i][0:])
 			v := t % indexLimit
 			w := uint32(numItems+(i-1)) % indexLimit
 			x := bitwiseXOR(*cache[v], *cache[w])
 
+			if i == 0 && q == 0 {
+				fmt.Printf("light_cache_rounds:%d num_items:%d index_limit:%d t:%d v:%d w:%d \n", lightCacheRounds, numItems, indexLimit, t, v, w)
+				fmt.Printf("x : %x\n", x)
+				fmt.Printf("buildLightCache cache[i] : %x\n", *cache[i])
+				fmt.Printf("buildLightCache cache[v] : %x\n", *cache[v])
+				fmt.Printf("buildLightCache cache[w] : %x\n", *cache[w])
+
+				var result hash512
+				for k := 0; k < 8; k++ {
+					//binary.BigEndian.PutUint64(result[4*i:], binary.BigEndian.Uint64(x[4*i:])^binary.BigEndian.Uint64(y[4*i:]))
+					binary.LittleEndian.PutUint64(result[8*k:], binary.LittleEndian.Uint64(cache[v][8*k:])^binary.LittleEndian.Uint64(cache[w][8*k:]))
+					fmt.Printf("result[4*i:]:%d cache[v][4*k:]:%d cache[w][4*k:]:%d  \n", binary.LittleEndian.Uint64(result[8*k:]), binary.LittleEndian.Uint64(cache[v][8*k:]), binary.LittleEndian.Uint64(cache[w][8*k:]))
+
+				}
+
+			}
+
 			hash.Reset()
 			hash.Write(x[:])
 			copy(cache[i][:], hash.Sum(nil))
+
 		}
 	}
+	fmt.Printf("buildLightCache cache[0] - 2 : %x\n", *cache[0])
+	fmt.Printf("buildLightCache cache[42] - 2 : %x\n", *cache[42])
+	fmt.Printf("buildLightCache cache[100] - 2 : %x\n", *cache[100])
 }
 
 func buildDatasetSegment(ctx *fishhashContext, start, end uint32) {
@@ -287,6 +336,10 @@ func getContext(full bool) *fishhashContext {
 	log.Debugf("getContext ==== building light cache\n")
 	buildLightCache(lightCache, lightCacheNumItems, seed)
 	log.Debugf("getContext ==== light cache done\n")
+
+	fmt.Printf("getContext object 0 : %x\n", lightCache[0])
+	fmt.Printf("getContext object 42 : %x\n", lightCache[42])
+	fmt.Printf("getContext object 100 : %x\n", lightCache[100])
 
 	log.Debugf("getContext fullDatasetNumItems - 2.0 : %d\n", fullDatasetNumItems)
 	fullDataset := make([]hash1024, fullDatasetNumItems)
