@@ -1,12 +1,14 @@
 package pow
 
 import (
+	"github.com/edsrzf/mmap-go"
 	"github.com/karlsen-network/karlsend/domain/consensus/model/externalapi"
 	"golang.org/x/crypto/sha3"
 
 	//"crypto/sha3"
 	"encoding/binary"
 	"fmt"
+	"os"
 	"sync"
 )
 
@@ -318,50 +320,69 @@ func buildDatasetSegment(ctx *fishhashContext, start, end uint32) {
 	}
 }
 
-func getContext(full bool) *fishhashContext {
-	sharedContextLock.Lock()
-	defer sharedContextLock.Unlock()
+func mapHashesToFile(hashes []hash1024, filename string) error {
+	// Create or open fila
+	file, err := os.Create(filename)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
 
-	if sharedContext != nil {
-		if !full || sharedContext.FullDataset != nil {
-			log.Debugf("log0 getContext ====\n")
-			return sharedContext
-		}
-		log.Debugf("log1 getContext ==== going to build dataset\n")
+	// hash1024 table size (128 per object)
+	size := len(hashes) * 128
+
+	// file size setup
+	err = file.Truncate(int64(size))
+	if err != nil {
+		return err
 	}
 
-	// DIABLE LIGHT CACHE FOR THE MOMENT
+	// Mapping the file in memory
+	mmap, err := mmap.Map(file, mmap.RDWR, 0)
+	if err != nil {
+		return err
+	}
+	defer mmap.Unmap()
 
-	lightCache := make([]*hash512, lightCacheNumItems)
-	log.Debugf("getContext ==== building light cache\n")
-	buildLightCache(lightCache, lightCacheNumItems, seed)
-	log.Debugf("getContext ==== light cache done\n")
-
-	fmt.Printf("getContext object 0 : %x\n", lightCache[0])
-	fmt.Printf("getContext object 42 : %x\n", lightCache[42])
-	fmt.Printf("getContext object 100 : %x\n", lightCache[100])
-
-	log.Debugf("getContext fullDatasetNumItems - 2.0 : %d\n", fullDatasetNumItems)
-	fullDataset := make([]hash1024, fullDatasetNumItems)
-
-	sharedContext = &fishhashContext{
-		ready:               false,
-		LightCacheNumItems:  lightCacheNumItems,
-		LightCache:          lightCache,
-		FullDatasetNumItems: fullDatasetNumItems,
-		FullDataset:         fullDataset,
+	// Copy data from memory to file
+	for i, hash := range hashes {
+		copy(mmap[i*128:(i+1)*128], hash[:])
 	}
 
-	log.Debugf("getContext object 12345 : %x\n", fullDataset[12345])
-
-	//test
-	if full {
-		log.Debugf("getContext ==== building full dataset\n")
-		prebuildDataset(sharedContext, 8)
-		log.Debugf("getContext ==== full dataset built\n")
+	// Sync data
+	err = mmap.Flush()
+	if err != nil {
+		return err
 	}
 
-	return sharedContext
+	return nil
+}
+
+func loadmappedHashesFromFile(filename string) ([]hash1024, error) {
+	// Open the file
+	file, err := os.Open(filename)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	// Mapping file in memory
+	mmap, err := mmap.Map(file, mmap.RDONLY, 0)
+	if err != nil {
+		return nil, err
+	}
+	defer mmap.Unmap()
+
+	// Get the nb of hash1028 (128bytes)
+	numHashes := len(mmap) / 128
+	hashes := make([]hash1024, numHashes)
+
+	// Read data and convert in hash1024
+	for i := 0; i < numHashes; i++ {
+		copy(hashes[i][:], mmap[i*128:(i+1)*128])
+	}
+
+	return hashes, nil
 }
 
 func prebuildDataset(ctx *fishhashContext, numThreads uint32) {
@@ -375,6 +396,25 @@ func prebuildDataset(ctx *fishhashContext, numThreads uint32) {
 		log.Debugf("dataset already generated\n")
 		return
 	}
+
+	// dag file name (hardcoded for debug)
+	filename := "hashes.dat"
+
+	fmt.Printf("Verifying DAG local storage file \n")
+	hashes, err := loadmappedHashesFromFile(filename)
+	if err == nil {
+		fmt.Printf("DAG loaded succesfully from local storage \n")
+		ctx.FullDataset = hashes
+
+		fmt.Printf("debug DAG hash[10] : %x\n", ctx.FullDataset[10])
+		fmt.Printf("debug DAG hash[42] : %x\n", ctx.FullDataset[42])
+		fmt.Printf("debug DAG hash[12345] : %x\n", ctx.FullDataset[12345])
+
+		fmt.Printf("DAG context ready \n")
+		ctx.ready = true
+		return
+	}
+
 	println("GENERATING DATASET ===============================================\n")
 
 	if numThreads > 1 {
@@ -400,6 +440,18 @@ func prebuildDataset(ctx *fishhashContext, numThreads uint32) {
 	} else {
 		log.Debugf("prebuildDataset solo thread\n")
 		buildDatasetSegment(ctx, 0, ctx.FullDatasetNumItems)
+	}
+
+	fmt.Printf("getContext object 10 : %x\n", ctx.FullDataset[10])
+	fmt.Printf("getContext object 42 : %x\n", ctx.FullDataset[42])
+	fmt.Printf("getContext object 12345 : %x\n", ctx.FullDataset[12345])
+
+	fmt.Printf("Saving dataset to file \n")
+	//err = saveHashesToFile(ctx.FullDataset, filename)
+	err = mapHashesToFile(ctx.FullDataset, filename)
+
+	if err != nil {
+		panic(err)
 	}
 
 	log.Debugf("DATASET GENERATED ===============================================\n")
