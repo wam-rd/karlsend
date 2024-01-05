@@ -40,6 +40,28 @@ type hash256 [32]byte
 type hash512 [64]byte
 type hash1024 [128]byte
 
+/*
+type hash512 struct {
+    data [64]byte
+}
+
+func (h *hash512) word32s() []uint32 {
+    word32s := make([]uint32, 16)
+    for i := range word32s {
+        word32s[i] = binary.LittleEndian.Uint32(h.data[i*4 : (i+1)*4])
+    }
+    return word32s
+}
+
+func (h *hash512) setWord32s(index int, value uint32) {
+    if index < 0 || index >= 16 {
+        panic("index out of range")
+    }
+    start := index * 4
+    binary.LittleEndian.PutUint32(h.data[start:start+4], value)
+}
+*/
+
 type fishhashContext struct {
 	ready               bool
 	LightCacheNumItems  int
@@ -54,9 +76,19 @@ func fnv1(u, v uint32) uint32 {
 
 func fnv1Hash512(u, v hash512) hash512 {
 	var result hash512
-	for i := 0; i < len(result); i++ {
-		result[i] = byte(fnv1(uint32(u[i]), uint32(v[i])))
+	/*
+		for i := 0; i < len(result); i++ {
+			//result[i] = byte(fnv1(uint32(u[i]), uint32(v[i])))
+			gxghsgh
+		}
+	*/
+
+	for j := 0; j < 16; j++ {
+		//fetch1[j] = byte(fnv1(uint32(mix[j]), uint32(fetch1[j])))
+		//fetch2[j] = mix[j] ^ fetch2[j]
+		binary.LittleEndian.PutUint32(result[4*j:], fnv1(binary.LittleEndian.Uint32(u[4*j:]), binary.LittleEndian.Uint32(v[4*j:])))
 	}
+
 	return result
 }
 
@@ -75,7 +107,8 @@ func newItemState(ctx *fishhashContext, index int64) *itemState {
 	}
 
 	state.mix = *state.cache[index%state.numCacheItems]
-	state.mix[0] ^= byte(state.seed)
+	//state.mix[0] ^= byte(state.seed)
+	binary.LittleEndian.PutUint32(state.mix[0:], binary.LittleEndian.Uint32(state.mix[0:])^state.seed)
 
 	//hash := sha3.New512()
 	hash := sha3.NewLegacyKeccak512()
@@ -88,9 +121,39 @@ func newItemState(ctx *fishhashContext, index int64) *itemState {
 func (state *itemState) update(round uint32) {
 	numWords := len(state.mix) / 4
 	//t := fnv1(state.seed^round, uint32(state.mix[round%uint32(numWords)]))
-	t := fnv1(state.seed^round, binary.BigEndian.Uint32(state.mix[round%uint32(numWords):]))
+	t := fnv1(state.seed^round, binary.LittleEndian.Uint32(state.mix[4*(round%uint32(numWords)):]))
 	parentIndex := t % uint32(state.numCacheItems)
 	state.mix = fnv1Hash512(state.mix, *state.cache[parentIndex])
+}
+
+func (state *itemState) updateD(round uint32) {
+	numWords := len(state.mix) / 4
+	//t := fnv1(state.seed^round, uint32(state.mix[round%uint32(numWords)]))
+	//t := fnv1(state.seed^round, binary.BigEndian.Uint32(state.mix[round%uint32(numWords):]))
+	t := fnv1(state.seed^round, binary.LittleEndian.Uint32(state.mix[4*(round%uint32(numWords)):]))
+	parentIndex := t % uint32(state.numCacheItems)
+
+	if round == 1 {
+		fmt.Printf("updateD state.seed is : %d\n", state.seed)
+		fmt.Printf("updateD round is : %d\n", round)
+		fmt.Printf("updateD round-uint32(numWords) is : %d\n", round%uint32(numWords))
+		fmt.Printf("updateD state.mix is : %x\n", state.mix[4*(round%uint32(numWords)):])
+		fmt.Printf("updateD LittleEndian is : %d\n", binary.LittleEndian.Uint32(state.mix[4*(round%uint32(numWords)):]))
+
+		fmt.Printf("updateD numWords is : %d\n", numWords)
+		fmt.Printf("updateD t is : %d\n", t)
+		fmt.Printf("updateD parentIndex is : %d\n", parentIndex)
+		fmt.Printf("updateD state.mix BEFORE is : %x\n", state.mix)
+	}
+	state.mix = fnv1Hash512(state.mix, *state.cache[parentIndex])
+
+	if round == 1 {
+		fmt.Printf("updateD cache parentindex is : %x\n", *state.cache[parentIndex])
+		fmt.Printf("updateD state.mix FINAL is : %x\n", state.mix)
+	}
+
+	//fmt.Printf("updateD round is : %d", round)
+	//fmt.Printf("mix : %x\n", state.mix)
 }
 
 func (state *itemState) final() hash512 {
@@ -105,11 +168,46 @@ func calculateDatasetItem1024(ctx *fishhashContext, index uint32) hash1024 {
 	item0 := newItemState(ctx, int64(index)*2)
 	item1 := newItemState(ctx, int64(index)*2+1)
 
+	/*
+		if index < 3 {
+			fmt.Printf("calculateDatasetItem1024 item0.mix is : %x\n", item0.mix)
+			fmt.Printf("calculateDatasetItem1024 item1.mix is : %x\n", item1.mix)
+		}
+
+		if index < 3 {
+			for j := uint32(0); j < fullDatasetItemParents; j++ {
+				item0.updateD(j)
+				item1.updateD(j)
+			}
+			fmt.Printf("calculateDatasetItem1024 item0.mix update is : %x\n", item0.mix)
+			fmt.Printf("calculateDatasetItem1024 item1.mix update is : %x\n", item1.mix)
+		} else {
+	*/
 	for j := uint32(0); j < fullDatasetItemParents; j++ {
 		item0.update(j)
 		item1.update(j)
 	}
-	return mergeHashes(item0.final(), item1.final())
+	//}
+
+	/*
+		if index < 3 {
+			fmt.Printf("calculateDatasetItem1024 item0.mix is : %x\n", item0.mix)
+			fmt.Printf("calculateDatasetItem1024 item1.mix is : %x\n", item1.mix)
+		}
+	*/
+
+	it0 := item0.final()
+	it1 := item1.final()
+
+	/*
+		if index < 3 {
+			fmt.Printf("calculateDatasetItem1024 it0 is : %x\n", it0)
+			fmt.Printf("calculateDatasetItem1024 it1 is : %x\n", it1)
+			fmt.Printf("calculateDatasetItem1024 merge is : %x\n", mergeHashes(it0, it1))
+		}
+	*/
+
+	return mergeHashes(it0, it1)
 }
 
 func lookup(ctx *fishhashContext, index uint32) hash1024 {
@@ -151,9 +249,9 @@ func fishhashKernel(ctx *fishhashContext, seed hash512) hash256 {
 			p2 := uint32(mix[8]) % indexLimit
 		*/
 
-		p0 := binary.BigEndian.Uint32(mix[0:4]) % indexLimit
-		p1 := binary.BigEndian.Uint32(mix[4:8]) % indexLimit
-		p2 := binary.BigEndian.Uint32(mix[8:12]) % indexLimit
+		p0 := binary.LittleEndian.Uint32(mix[0:4]) % indexLimit
+		p1 := binary.LittleEndian.Uint32(mix[4:8]) % indexLimit
+		p2 := binary.LittleEndian.Uint32(mix[8:12]) % indexLimit
 
 		//fmt.Printf("The words is : %d - %d - %d\n", mix[0], mix[4], mix[8])
 		//fmt.Printf("The words lg is : %d - %d - %d\n", mix[0:4], mix[4:8], mix[8:12])
@@ -172,12 +270,12 @@ func fishhashKernel(ctx *fishhashContext, seed hash512) hash256 {
 		for j := 0; j < 32; j++ {
 			//fetch1[j] = byte(fnv1(uint32(mix[j]), uint32(fetch1[j])))
 			//fetch2[j] = mix[j] ^ fetch2[j]
-			binary.BigEndian.PutUint32(
+			binary.LittleEndian.PutUint32(
 				fetch1[4*j:],
-				fnv1(binary.BigEndian.Uint32(mix[4*j:4*j+4]), binary.BigEndian.Uint32(fetch1[4*j:4*j+4])))
-			binary.BigEndian.PutUint32(
+				fnv1(binary.LittleEndian.Uint32(mix[4*j:4*j+4]), binary.LittleEndian.Uint32(fetch1[4*j:4*j+4])))
+			binary.LittleEndian.PutUint32(
 				fetch2[4*j:],
-				binary.BigEndian.Uint32(mix[4*j:4*j+4])^binary.BigEndian.Uint32(fetch2[4*j:4*j+4]))
+				binary.LittleEndian.Uint32(mix[4*j:4*j+4])^binary.LittleEndian.Uint32(fetch2[4*j:4*j+4]))
 		}
 
 		//fmt.Printf("The NEW fetch1 is : %x \n", fetch1)
@@ -185,9 +283,9 @@ func fishhashKernel(ctx *fishhashContext, seed hash512) hash256 {
 
 		for j := 0; j < 16; j++ {
 			//mix[j] = fetch0[j]*fetch1[j] + fetch2[j]
-			binary.BigEndian.PutUint64(
+			binary.LittleEndian.PutUint64(
 				mix[8*j:],
-				binary.BigEndian.Uint64(fetch0[8*j:8*j+8])*binary.BigEndian.Uint64(fetch1[8*j:8*j+8])+binary.BigEndian.Uint64(fetch2[8*j:8*j+8]))
+				binary.LittleEndian.Uint64(fetch0[8*j:8*j+8])*binary.LittleEndian.Uint64(fetch1[8*j:8*j+8])+binary.LittleEndian.Uint64(fetch2[8*j:8*j+8]))
 		}
 		log.Debugf("\n")
 	}
@@ -201,10 +299,10 @@ func fishhashKernel(ctx *fishhashContext, seed hash512) hash256 {
 		//h3 := fnv1(h2, uint32(mix[i+3]))
 		//mixHash[i/4] = byte(h3)
 		j := 4 * i
-		h1 := fnv1(binary.BigEndian.Uint32(mix[j:j+4]), binary.BigEndian.Uint32(mix[(j+1):(j+1)+4]))
-		h2 := fnv1(h1, binary.BigEndian.Uint32(mix[(j+2):(j+2)+4]))
-		h3 := fnv1(h2, binary.BigEndian.Uint32(mix[(j+3):(j+3)+4]))
-		binary.BigEndian.PutUint32(mixHash[i:], h3)
+		h1 := fnv1(binary.LittleEndian.Uint32(mix[j:j+4]), binary.LittleEndian.Uint32(mix[(j+1):(j+1)+4]))
+		h2 := fnv1(h1, binary.LittleEndian.Uint32(mix[(j+2):(j+2)+4]))
+		h3 := fnv1(h2, binary.LittleEndian.Uint32(mix[(j+3):(j+3)+4]))
+		binary.LittleEndian.PutUint32(mixHash[i:], h3)
 
 	}
 
@@ -256,10 +354,12 @@ func buildLightCache(cache []*hash512, numItems int, seed hash256) {
 	//cache[0] = &item
 	cache[0] = &item
 
-	fmt.Printf("buildLightCache seed : %x\n", seed) //ok
-	fmt.Printf("buildLightCache item : %x\n", item) //ok
-	fmt.Printf("buildLightCache cache[0] : %x\n", cache[0])
-	fmt.Printf("buildLightCache *cache[0] : %x\n", *cache[0])
+	/*
+		fmt.Printf("buildLightCache seed : %x\n", seed) //ok
+		fmt.Printf("buildLightCache item : %x\n", item) //ok
+		fmt.Printf("buildLightCache cache[0] : %x\n", cache[0])
+		fmt.Printf("buildLightCache *cache[0] : %x\n", *cache[0])
+	*/
 
 	for i := 1; i < numItems; i++ {
 		hash.Reset()
@@ -272,9 +372,12 @@ func buildLightCache(cache []*hash512, numItems int, seed hash256) {
 		cache[i] = &newitem
 		//copy(cache[i][:], hash.Sum(nil))
 	}
-	fmt.Printf("buildLightCache cache[0] : %x\n", *cache[0])
-	fmt.Printf("buildLightCache cache[42] : %x\n", *cache[42])
-	fmt.Printf("buildLightCache cache[100] : %x\n", *cache[100])
+
+  /*
+		fmt.Printf("buildLightCache cache[0] : %x\n", *cache[0])
+		fmt.Printf("buildLightCache cache[42] : %x\n", *cache[42])
+		fmt.Printf("buildLightCache cache[100] : %x\n", *cache[100])
+	*/
 
 	for q := 0; q < lightCacheRounds; q++ {
 		for i := 0; i < numItems; i++ {
@@ -287,17 +390,21 @@ func buildLightCache(cache []*hash512, numItems int, seed hash256) {
 			x := bitwiseXOR(*cache[v], *cache[w])
 
 			if i == 0 && q == 0 {
-				fmt.Printf("light_cache_rounds:%d num_items:%d index_limit:%d t:%d v:%d w:%d \n", lightCacheRounds, numItems, indexLimit, t, v, w)
-				fmt.Printf("x : %x\n", x)
-				fmt.Printf("buildLightCache cache[i] : %x\n", *cache[i])
-				fmt.Printf("buildLightCache cache[v] : %x\n", *cache[v])
-				fmt.Printf("buildLightCache cache[w] : %x\n", *cache[w])
+
+				/*
+					fmt.Printf("light_cache_rounds:%d num_items:%d index_limit:%d t:%d v:%d w:%d \n", lightCacheRounds, numItems, indexLimit, t, v, w)
+					fmt.Printf("x : %x\n", x)
+					fmt.Printf("buildLightCache cache[i] : %x\n", *cache[i])
+					fmt.Printf("buildLightCache cache[v] : %x\n", *cache[v])
+					fmt.Printf("buildLightCache cache[w] : %x\n", *cache[w])
+				*/
 
 				var result hash512
 				for k := 0; k < 8; k++ {
 					//binary.BigEndian.PutUint64(result[4*i:], binary.BigEndian.Uint64(x[4*i:])^binary.BigEndian.Uint64(y[4*i:]))
 					binary.LittleEndian.PutUint64(result[8*k:], binary.LittleEndian.Uint64(cache[v][8*k:])^binary.LittleEndian.Uint64(cache[w][8*k:]))
-					fmt.Printf("result[4*i:]:%d cache[v][4*k:]:%d cache[w][4*k:]:%d  \n", binary.LittleEndian.Uint64(result[8*k:]), binary.LittleEndian.Uint64(cache[v][8*k:]), binary.LittleEndian.Uint64(cache[w][8*k:]))
+          
+					//fmt.Printf("result[4*i:]:%d cache[v][4*k:]:%d cache[w][4*k:]:%d  \n", binary.LittleEndian.Uint64(result[8*k:]), binary.LittleEndian.Uint64(cache[v][8*k:]), binary.LittleEndian.Uint64(cache[w][8*k:]))
 
 				}
 
@@ -309,9 +416,13 @@ func buildLightCache(cache []*hash512, numItems int, seed hash256) {
 
 		}
 	}
-	fmt.Printf("buildLightCache cache[0] - 2 : %x\n", *cache[0])
-	fmt.Printf("buildLightCache cache[42] - 2 : %x\n", *cache[42])
-	fmt.Printf("buildLightCache cache[100] - 2 : %x\n", *cache[100])
+
+	/*
+		fmt.Printf("buildLightCache cache[0] - 2 : %x\n", *cache[0])
+		fmt.Printf("buildLightCache cache[42] - 2 : %x\n", *cache[42])
+		fmt.Printf("buildLightCache cache[100] - 2 : %x\n", *cache[100])
+	*/
+
 }
 
 func buildDatasetSegment(ctx *fishhashContext, start, end uint32) {
@@ -348,6 +459,7 @@ func mapHashesToFile(hashes []hash1024, filename string) error {
 	for i, hash := range hashes {
 		copy(mmap[i*128:(i+1)*128], hash[:])
 	}
+
 
 	// Sync data
 	err = mmap.Flush()
@@ -446,6 +558,7 @@ func prebuildDataset(ctx *fishhashContext, numThreads uint32) {
 	fmt.Printf("getContext object 42 : %x\n", ctx.FullDataset[42])
 	fmt.Printf("getContext object 12345 : %x\n", ctx.FullDataset[12345])
 
+
 	fmt.Printf("Saving dataset to file \n")
 	//err = saveHashesToFile(ctx.FullDataset, filename)
 	err = mapHashesToFile(ctx.FullDataset, filename)
@@ -453,6 +566,7 @@ func prebuildDataset(ctx *fishhashContext, numThreads uint32) {
 	if err != nil {
 		panic(err)
 	}
+
 
 	log.Debugf("DATASET GENERATED ===============================================\n")
 	ctx.ready = true
