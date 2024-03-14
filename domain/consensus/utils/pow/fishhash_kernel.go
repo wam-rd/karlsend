@@ -76,9 +76,20 @@ func fishhashKernel(ctx *fishhashContext, seed hash512) hash256 {
 	//log.Debugf("lookup matrix : ")
 	for i := uint32(0); i < numDatasetAccesses; i++ {
 
-		p0 := binary.LittleEndian.Uint32(mix[0:]) % indexLimit
-		p1 := binary.LittleEndian.Uint32(mix[4*4:]) % indexLimit
-		p2 := binary.LittleEndian.Uint32(mix[8*4:]) % indexLimit
+		/*
+			p0 := binary.LittleEndian.Uint32(mix[0:]) % indexLimit
+			p1 := binary.LittleEndian.Uint32(mix[4*4:]) % indexLimit
+			p2 := binary.LittleEndian.Uint32(mix[8*4:]) % indexLimit
+		*/
+
+		mixGroup := [8]uint32{}
+		for c := uint32(0); c < 8; c++ {
+			mixGroup[c] = binary.LittleEndian.Uint32(mix[(4*4*c+0):]) ^ binary.LittleEndian.Uint32(mix[(4*4*c+4):]) ^ binary.LittleEndian.Uint32(mix[(4*4*c+8):]) ^ binary.LittleEndian.Uint32(mix[(4*4*c+12):])
+		}
+
+		p0 := (mixGroup[0] ^ mixGroup[3] ^ mixGroup[6]) % indexLimit
+		p1 := (mixGroup[1] ^ mixGroup[4] ^ mixGroup[7]) % indexLimit
+		p2 := (mixGroup[2] ^ mixGroup[5] ^ i) % indexLimit
 
 		fetch0 := lookup(ctx, p0)
 		fetch1 := lookup(ctx, p1)
